@@ -109,7 +109,7 @@ export default function SettingsPanel() {
       <div className="mb-3 px-3 py-2 rounded-xl bg-[var(--highlight)] border border-[var(--border-color)] text-sm">
         <span className="text-[var(--text-tertiary)]">Tips: </span>
         <a
-          href="https://foxcode.rjj.cc/auth/register?aff=8LR7"
+          href="https://geminicode.net/register?aff=e4Kv"
           target="_blank"
           rel="noopener noreferrer"
           className="text-[var(--link-color)] hover:underline"
