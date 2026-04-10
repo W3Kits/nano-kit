@@ -9,7 +9,7 @@ interface MessageItemProps {
 
 export default function MessageItem({ message }: MessageItemProps) {
   const navigate = useNavigate()
-  const { openLightbox, deleteMessage, openSlicerModal, addInputImage, showToast, showConfirm } = useAppStore()
+  const { openLightbox, deleteMessage, openImageEditor, addInputImage, showToast, showConfirm } = useAppStore()
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -104,7 +104,7 @@ export default function MessageItem({ message }: MessageItemProps) {
             onDownload={handleDownload}
             onUseAsRef={handleUseAsReference}
             onSlice={(src) => {
-              openSlicerModal(src)
+              openImageEditor({ imageUrl: src, initialTab: 'slice' })
               navigate('/editor')
             }}
           />

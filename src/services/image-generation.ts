@@ -1,5 +1,6 @@
 import type { Provider } from '../types'
 import { buildDynamicImageModel, buildGeminiUrl, buildOpenAIUrl, nativeFetch } from '../utils/helpers'
+import { buildRedundantImagePayload } from './image-payloads'
 
 export type ImageQuality = '1K' | '2K' | '4K'
 
@@ -90,23 +91,26 @@ export async function requestImageGeneration(
 ): Promise<string> {
   const { prompt, quality, ratio, enableModelSuffix = true } = input
   const model = buildDynamicImageModel(config.imageModel, quality, ratio, enableModelSuffix)
+  const payload = {
+    model,
+    ...buildRedundantImagePayload({
+      prompt,
+      images: [],
+      resolution: quality,
+      aspectRatio: ratio,
+      stream: false,
+      responseModalities: ['IMAGE']
+    })
+  }
 
   if (config.type === 'openai') {
-    const size = getOpenAIImageSize(quality)
-
     const res = await nativeFetch(buildOpenAIUrl(config.host, '/chat/completions'), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${config.key}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
-        stream: false,
-        size,
-        aspect_ratio: ratio
-      })
+      body: JSON.stringify(payload)
     })
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -127,13 +131,7 @@ export async function requestImageGeneration(
       'Content-Type': 'application/json',
       'x-goog-api-key': config.key
     },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseModalities: ['IMAGE'],
-        imageConfig: { imageSize: quality, aspectRatio: ratio }
-      }
-    })
+    body: JSON.stringify(payload)
   })
 
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -157,10 +155,4 @@ export function normalizeModelBlocks(parsed: unknown): any[] {
     return [parsed]
   }
   return []
-}
-
-function getOpenAIImageSize(quality: ImageQuality): string {
-  if (quality === '2K') return '2048x2048'
-  if (quality === '4K') return '4096x4096'
-  return '1024x1024'
 }

@@ -1,6 +1,7 @@
 import { useRef, useState, useCallback, useEffect, DragEvent } from 'react'
 import { useAppStore } from '../../store/appStore'
 import { compressImage } from '../../utils/helpers'
+import { submitComposerDraft } from '@/features/chat/composer'
 
 export default function ChatInput({ variant = 'inline' }: { variant?: 'inline' | 'floating' }) {
   const {
@@ -15,11 +16,13 @@ export default function ChatInput({ variant = 'inline' }: { variant?: 'inline' |
     pendingInputText,
     setPendingInputText,
     setResolution,
-    setAspectRatio
+    setAspectRatio,
+    getActiveConfig
   } = useAppStore()
 
   const [text, setText] = useState('')
   const [isDragOver, setIsDragOver] = useState(false)
+  const [isSending, setIsSending] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -60,6 +63,10 @@ export default function ChatInput({ variant = 'inline' }: { variant?: 'inline' |
     for (const file of imageFiles) {
       const compressed = await compressImage(file)
       addInputImage(compressed)
+    }
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
     }
   }
 
@@ -107,17 +114,33 @@ export default function ChatInput({ variant = 'inline' }: { variant?: 'inline' |
   }
 
   const handleSend = async () => {
-    const trimmedText = text.trim()
-    if (!trimmedText && inputImages.length === 0) return
+    if (isSending) return
 
     const { sendMessage } = await import('../../services/api')
-    setText('')
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-    }
+    const result = await submitComposerDraft(
+      {
+        text,
+        images: inputImages
+      },
+      {
+        getConfig: () => getActiveConfig(),
+        performSend: async (draft) => {
+          await sendMessage(draft.text, draft.images)
+        },
+        clearDraft: () => {
+          setText('')
+          clearInputImages()
+          if (textareaRef.current) {
+            textareaRef.current.style.height = 'auto'
+          }
+        },
+        setSending: setIsSending
+      }
+    )
 
-    await sendMessage(trimmedText, inputImages)
-    clearInputImages()
+    if (!result.ok && result.errorMessage) {
+      showToast(result.errorMessage, 'warning', 3000)
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -127,7 +150,7 @@ export default function ChatInput({ variant = 'inline' }: { variant?: 'inline' |
     }
   }
 
-  const canSend = text.trim().length > 0 || inputImages.length > 0
+  const canSend = !isSending && (text.trim().length > 0 || inputImages.length > 0)
 
   const wrapperClassName =
     variant === 'floating' ? '' : 'border-t border-[var(--border-color)] bg-[var(--bg-primary)] p-4'
@@ -252,10 +275,10 @@ export default function ChatInput({ variant = 'inline' }: { variant?: 'inline' |
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleSend}
-              disabled={!canSend}
+              <button
+                type="button"
+                onClick={handleSend}
+                disabled={!canSend}
               className={[
                 'pointer-events-auto flex items-center justify-center w-10 h-10 rounded-xl transition-all active:scale-95',
                 canSend
@@ -264,9 +287,13 @@ export default function ChatInput({ variant = 'inline' }: { variant?: 'inline' |
               ].join(' ')}
               aria-label="Send"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 10.5L12 3m0 0l7.5 7.5M12 3v18" />
-              </svg>
+              {isSending ? (
+                <div className="loading-spinner w-4 h-4 border-[2px] border-current border-t-transparent" />
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 10.5L12 3m0 0l7.5 7.5M12 3v18" />
+                </svg>
+              )}
             </button>
           </div>
         </div>

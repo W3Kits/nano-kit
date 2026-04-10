@@ -64,7 +64,7 @@ function EmptyState() {
           icon={<ImageIcon />}
           title="生成图片"
           desc="输入描述生成图片"
-          onClick={() => navigate('/create')}
+          onClick={() => navigate('/')}
         />
         <QuickAction
           icon={<BookIcon />}

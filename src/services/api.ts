@@ -2,6 +2,7 @@ import { useAppStore } from '../store/appStore'
 import { nativeFetch, escapeHtml, buildDynamicImageModel, buildOpenAIUrl, buildGeminiUrl } from '../utils/helpers'
 import type { ImageState } from '../types'
 import * as db from '../utils/db'
+import { buildRedundantImagePayload, createImagePartFromDataUrl } from './image-payloads'
 
 export async function sendMessage(text: string, images: ImageState[]) {
   const store = useAppStore.getState()
@@ -13,19 +14,16 @@ export async function sendMessage(text: string, images: ImageState[]) {
     updateSessionTitle,
     loadSessions,
     addActiveGeneration,
-    removeActiveGeneration,
-    showToast
+    removeActiveGeneration
   } = store
 
   const config = getActiveConfig()
 
   if (!config) {
-    showToast('请先在设置中添加 API 渠道', 'warning')
-    return
+    throw new Error('请先在设置中添加 API 渠道')
   }
   if (!config.imageModel) {
-    showToast('请先在设置中填写绘图模型', 'warning')
-    return
+    throw new Error('请先在设置中填写绘图模型')
   }
 
   // Single-turn generation: every send starts a fresh session.
@@ -77,7 +75,7 @@ export async function sendMessage(text: string, images: ImageState[]) {
 
     const errorHtml = `<div class="msg-content" style="color:#d93025">❌ Error: ${escapeHtml(msg)}</div>`
     await saveMessage(sessionId, 'bot', 'Error', [], errorHtml)
-    showToast('生成失败: ' + msg, 'error', 3000)
+    throw new Error(msg)
   } finally {
     removeActiveGeneration(sessionId)
   }
@@ -91,38 +89,16 @@ async function callOpenAIAPI(
 ) {
   const { resolution, aspectRatio, enableModelSuffix = true } = options
   const model = buildDynamicImageModel(config.imageModel, resolution, aspectRatio, enableModelSuffix)
-
-  const messages: any[] = []
-
-  // Add current message
-  const currentMessage: any = {
-    role: 'user',
-    content: [{ type: 'text', text: text || 'Generate image' }]
-  }
-
-  imagesBase64.forEach(b64 => {
-    currentMessage.content.push({
-      type: 'image_url',
-      image_url: { url: `data:image/jpeg;base64,${b64}` }
-    })
-  })
-
-  messages.push(currentMessage)
-
-  // Determine size
-  let size = '1024x1024'
-  if (resolution === '2K') size = '2048x2048'
-  else if (resolution === '4K') size = '4096x4096'
-
   const payload: any = {
     model,
-    messages,
-    stream: true,
-    size
-  }
-
-  if (aspectRatio !== 'auto') {
-    payload.aspect_ratio = aspectRatio
+    ...buildRedundantImagePayload({
+      prompt: text || 'Generate image',
+      images: imagesBase64.map((b64) => createImagePartFromDataUrl(`data:image/jpeg;base64,${b64}`)),
+      resolution,
+      aspectRatio,
+      stream: true,
+      responseModalities: ['TEXT', 'IMAGE']
+    })
   }
 
   const res = await nativeFetch(buildOpenAIUrl(config.host, '/chat/completions'), {
@@ -155,26 +131,16 @@ async function callGeminiAPI(
 ) {
   const { resolution, aspectRatio, enableModelSuffix = true } = options
   const model = buildDynamicImageModel(config.imageModel, resolution, aspectRatio, enableModelSuffix)
-
-  const contents: any[] = []
-
-  // Add current message
-  const currentParts: any[] = text ? [{ text }] : [{ text: 'Generate image' }]
-  imagesBase64.forEach(b64 => {
-    currentParts.push({ inline_data: { mime_type: 'image/jpeg', data: b64 } })
-  })
-  contents.push({ role: 'user', parts: currentParts })
-
-  const generationConfig: any = {
-    responseModalities: ['TEXT', 'IMAGE'],
-    imageConfig: { imageSize: resolution }
+  const payload = {
+    ...buildRedundantImagePayload({
+      prompt: text || 'Generate image',
+      images: imagesBase64.map((b64) => createImagePartFromDataUrl(`data:image/jpeg;base64,${b64}`)),
+      resolution,
+      aspectRatio,
+      stream: true,
+      responseModalities: ['TEXT', 'IMAGE']
+    })
   }
-
-  if (aspectRatio && aspectRatio !== 'auto') {
-    generationConfig.imageConfig.aspectRatio = aspectRatio
-  }
-
-  const payload = { contents, generationConfig }
 
   const res = await nativeFetch(
     buildGeminiUrl(config.host, `/models/${model}:generateContent`),

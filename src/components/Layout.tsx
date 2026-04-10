@@ -7,6 +7,7 @@ import DesktopHeader from './layout/DesktopHeader'
 import { PageHeaderProvider } from './layout/PageHeaderContext'
 import BananaModal from './modals/BananaModal'
 import ConfirmDialog from './ui/ConfirmDialog'
+import SettingsModal from './modals/SettingsModal'
 
 const HomePage = lazy(() => import('../pages/HomePage'))
 const GeneratePage = lazy(() => import('../pages/GeneratePage'))
@@ -46,6 +47,7 @@ export default function Layout() {
                     <Route path="/prompts" element={<MyPromptsPage />} />
                     <Route path="/editor" element={<ImageEditorPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
+                    <Route path="/create" element={<Navigate to="/" replace />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
                 </Suspense>
@@ -64,6 +66,7 @@ export default function Layout() {
 
       {/* Modals */}
       <BananaModal />
+      <SettingsModal />
       <ConfirmDialog />
     </div>
   )

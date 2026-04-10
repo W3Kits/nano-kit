@@ -3,24 +3,38 @@ import type { AppState } from '../appStore'
 
 export interface ModalSlice {
   bananaModalOpen: boolean
-  slicerImageUrl: string | null
+  settingsModalOpen: boolean
+  editorImageUrl: string | null
+  editorInitialTab: 'slice' | 'edit'
   openBananaModal: () => void
   closeBananaModal: () => void
-  openSlicerModal: (imageUrl?: string) => void
-  closeSlicerModal: () => void
+  openSettingsModal: () => void
+  closeSettingsModal: () => void
+  openImageEditor: (payload?: { imageUrl?: string; initialTab?: 'slice' | 'edit' }) => void
+  closeImageEditor: () => void
 }
 
 export const createModalSlice: StateCreator<AppState, [], [], ModalSlice> = (set, get) => ({
   bananaModalOpen: false,
-  slicerImageUrl: null,
+  settingsModalOpen: false,
+  editorImageUrl: null,
+  editorInitialTab: 'slice',
   openBananaModal: () => {
     get().closeAllSidebars()
     set({ bananaModalOpen: true })
   },
   closeBananaModal: () => set({ bananaModalOpen: false }),
-  openSlicerModal: (imageUrl) => {
+  openSettingsModal: () => {
     get().closeAllSidebars()
-    set({ slicerImageUrl: imageUrl || null })
+    set({ settingsModalOpen: true })
   },
-  closeSlicerModal: () => set({ slicerImageUrl: null })
+  closeSettingsModal: () => set({ settingsModalOpen: false }),
+  openImageEditor: (payload) => {
+    get().closeAllSidebars()
+    set({
+      editorImageUrl: payload?.imageUrl || null,
+      editorInitialTab: payload?.initialTab || 'slice'
+    })
+  },
+  closeImageEditor: () => set({ editorImageUrl: null, editorInitialTab: 'slice' })
 })

@@ -42,7 +42,7 @@ export default function GalleryMasonry({
     activeGenerations,
     openLightbox,
     addInputImage,
-    openSlicerModal,
+    openImageEditor,
     setPendingInputText,
     showToast,
     showConfirm
@@ -302,7 +302,7 @@ export default function GalleryMasonry({
                     <OverlayActionButton
                       label="编辑图片"
                       onClick={() => {
-                        openSlicerModal(item.imageSrc)
+                        openImageEditor({ imageUrl: item.imageSrc, initialTab: 'edit' })
                         navigate('/editor')
                       }}
                       icon={
@@ -365,8 +365,8 @@ export default function GalleryMasonry({
                         }
                         setPendingInputText(text)
                         showToast('提示词已填充到输入框', 'success')
-                        if (location.pathname !== '/create') {
-                          navigate('/create')
+                        if (location.pathname !== '/') {
+                          navigate('/')
                         }
                       }}
                       label="应用提示词"

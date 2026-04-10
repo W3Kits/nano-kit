@@ -117,8 +117,8 @@ export default function MyPromptsPage() {
   const handleUse = (text: string) => {
     setPendingInputText(text)
     showToast('提示词已填充到输入框', 'success')
-    if (location.pathname !== '/create') {
-      navigate('/create')
+    if (location.pathname !== '/') {
+      navigate('/')
     }
   }
 

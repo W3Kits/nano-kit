@@ -47,7 +47,7 @@ export default function HomePage() {
       </div>
       <div className="relative group">
         <Link
-          to="/create"
+          to="/"
           className="p-2 rounded-xl bg-[var(--accent-color)] text-white shadow-sm hover:bg-[var(--accent-hover)] transition-colors flex items-center justify-center"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -115,7 +115,7 @@ export default function HomePage() {
             </div>
             <div className="relative group">
               <Link
-                to="/create"
+                to="/"
                 className="p-2 rounded-xl bg-[var(--accent-color)] text-white shadow-sm hover:bg-[var(--accent-hover)] transition-colors flex items-center justify-center"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

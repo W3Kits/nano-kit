@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/appStore'
 import { downloadImage } from '../utils/helpers'
 import { normalizeModelBlocks, requestImageGeneration, requestTextGeneration } from '../services/image-generation'
@@ -27,18 +27,20 @@ export default function InfographicPage() {
     openLightbox,
     createSession,
     saveMessage,
-    bumpGalleryRefreshKey
+    bumpGalleryRefreshKey,
+    openSettingsModal
   } = useAppStore()
   const { setHeader } = usePageHeader()
 
   const headerActions = useMemo(() => (
-    <Link
-      to="/settings"
+    <button
+      type="button"
+      onClick={openSettingsModal}
       className="shrink-0 px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-sm shadow-sm hover:bg-[var(--bg-tertiary)] transition-colors"
     >
       去设置
-    </Link>
-  ), [])
+    </button>
+  ), [openSettingsModal])
 
   useEffect(() => {
     setHeader({
@@ -434,12 +436,12 @@ export default function InfographicPage() {
     const textConfig = getActiveConfig('text')
     if (!textConfig) {
       showToast('请先在设置中配置文案生成渠道', 'warning')
-      navigate('/settings')
+      openSettingsModal()
       return
     }
     if (!textConfig.textModel) {
       showToast('请先在设置中填写文案渠道的文本模型', 'warning')
-      navigate('/settings')
+      openSettingsModal()
       return
     }
 
@@ -502,12 +504,12 @@ export default function InfographicPage() {
     const config = getActiveConfig()
     if (!config) {
       showToast('请先在设置中配置绘图 API 渠道', 'warning')
-      navigate('/settings')
+      openSettingsModal()
       return
     }
     if (!config.imageModel) {
       showToast('请先在设置中填写绘图模型', 'warning')
-      navigate('/settings')
+      openSettingsModal()
       return
     }
 
@@ -851,7 +853,7 @@ export default function InfographicPage() {
                               </button>
                               <button
                                 onClick={() => {
-                                  useAppStore.getState().openSlicerModal(block.imageData!)
+                                  useAppStore.getState().openImageEditor({ imageUrl: block.imageData!, initialTab: 'slice' })
                                   navigate('/editor')
                                 }}
                                 className="px-2.5 py-1.5 rounded-full bg-[rgba(20,20,19,0.55)] text-white text-xs border border-white/15 backdrop-blur-sm hover:bg-[rgba(20,20,19,0.72)] transition-colors shadow-sm"
