@@ -42,7 +42,9 @@ export interface UISlice {
   hideLoading: () => void
   updateLoadingText: (text: string) => void
   leftSidebarOpen: boolean
+  leftSidebarCollapsed: boolean
   toggleLeftSidebar: () => void
+  toggleLeftSidebarCollapsed: () => void
   closeAllSidebars: () => void
 }
 
@@ -50,6 +52,8 @@ const getStoredTheme = () => {
   const saved = safeStorageGet('theme')
   return saved === 'dark' || saved === 'light' ? saved : 'light'
 }
+
+const getStoredLeftSidebarCollapsed = () => safeStorageGet('leftSidebarCollapsed') === 'true'
 
 export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get) => ({
   theme: getStoredTheme(),
@@ -112,6 +116,12 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   updateLoadingText: (text) => set(state => ({ globalLoading: { ...state.globalLoading, text } })),
 
   leftSidebarOpen: false,
+  leftSidebarCollapsed: getStoredLeftSidebarCollapsed(),
   toggleLeftSidebar: () => set(state => ({ leftSidebarOpen: !state.leftSidebarOpen })),
+  toggleLeftSidebarCollapsed: () => {
+    const nextCollapsed = !get().leftSidebarCollapsed
+    scheduleStorageWrite('leftSidebarCollapsed', String(nextCollapsed))
+    set({ leftSidebarCollapsed: nextCollapsed })
+  },
   closeAllSidebars: () => set({ leftSidebarOpen: false })
 })

@@ -967,12 +967,12 @@ export default function ArticleIllustrationPage() {
                               </button>
                               <button
                                 onClick={() => {
-                                  useAppStore.getState().openImageEditor({ imageUrl: block.imageData!, initialTab: 'slice' })
+                                  useAppStore.getState().openImageEditor({ imageUrl: block.imageData!, initialTab: 'edit' })
                                   navigate('/editor')
                                 }}
                                 className="px-2.5 py-1.5 rounded-full bg-[rgba(20,20,19,0.55)] text-white text-xs border border-white/15 backdrop-blur-sm hover:bg-[rgba(20,20,19,0.72)] transition-colors shadow-sm"
                               >
-                                去切片
+                                编辑
                               </button>
                             </div>
                           )}
