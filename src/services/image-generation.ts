@@ -1,6 +1,6 @@
 import type { Provider } from '../types'
-import { buildDynamicImageModel, buildGeminiUrl, buildOpenAIUrl, nativeFetch } from '../utils/helpers'
-import { buildRedundantImagePayload } from './image-payloads'
+import { buildGeminiUrl, buildOpenAIUrl, nativeFetch } from '../utils/helpers'
+import { requestSharedImage } from './shared-image-request'
 
 export type ImageQuality = '1K' | '2K' | '4K'
 
@@ -90,59 +90,17 @@ export async function requestImageGeneration(
   input: ImageGenerationInput
 ): Promise<string> {
   const { prompt, quality, ratio, enableModelSuffix = true } = input
-  const model = buildDynamicImageModel(config.imageModel, quality, ratio, enableModelSuffix)
-  const payload = {
-    model,
-    ...buildRedundantImagePayload({
-      prompt,
-      images: [],
-      resolution: quality,
-      aspectRatio: ratio,
-      stream: false,
-      responseModalities: ['IMAGE']
-    })
-  }
-
-  if (config.type === 'openai') {
-    const res = await nativeFetch(buildOpenAIUrl(config.host, '/chat/completions'), {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.key}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    })
-
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-
-    const data = await res.json()
-    if (data.error) throw new Error(data.error.message)
-
-    const content = data.choices?.[0]?.message?.content || ''
-    const match = content.match(/!\[.*?\]\((data:image\/[^)]+)\)/)
-    if (match) return match[1]
-
-    throw new Error('未返回图片数据')
-  }
-
-  const res = await nativeFetch(buildGeminiUrl(config.host, `/models/${model}:generateContent`), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': config.key
-    },
-    body: JSON.stringify(payload)
+  const result = await requestSharedImage(config, {
+    prompt,
+    images: [],
+    resolution: quality,
+    aspectRatio: ratio,
+    enableModelSuffix,
+    stream: true,
+    responseModalities: ['TEXT', 'IMAGE']
   })
 
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-
-  const data = await res.json()
-  if (data.error) throw new Error(data.error.message)
-
-  const inlineData = data.candidates?.[0]?.content?.parts?.[0]?.inlineData
-  if (inlineData?.data && inlineData?.mimeType) {
-    return `data:${inlineData.mimeType};base64,${inlineData.data}`
-  }
+  if (result.images[0]) return result.images[0]
 
   throw new Error('未返回图片数据')
 }

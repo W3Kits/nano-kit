@@ -37,10 +37,12 @@ describe('requestImageGeneration', () => {
     vi.unstubAllGlobals()
   })
 
-  it('sends redundant OpenAI and Gemini fields for OpenAI-compatible image generation', async () => {
+  it('uses the shared OpenAI image request path with SSE and mixed TEXT/IMAGE modalities', async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const payload = JSON.parse(String(init?.body))
 
+      expect(payload.model).toBe('gpt-image-1')
+      expect(payload.stream).toBe(true)
       expect(payload.messages).toEqual([
         {
           role: 'user',
@@ -56,30 +58,27 @@ describe('requestImageGeneration', () => {
       expect(payload.size).toBe('2048x2048')
       expect(payload.aspect_ratio).toBe('16:9')
       expect(payload.generationConfig).toEqual({
-        responseModalities: ['IMAGE'],
+        responseModalities: ['TEXT', 'IMAGE'],
         imageConfig: {
           imageSize: '2K',
           aspectRatio: '16:9'
         }
       })
 
-      return new Response(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content: '![result](data:image/png;base64,AAAA)'
-              }
-            }
-          ]
-        }),
-        {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/json'
-          }
+      const body = [
+        'data: {"choices":[{"delta":{"content":"Scene analysis\\n"}}]}',
+        'data: {"choices":[{"delta":{"content":"![result](data:image/png;base64,AAAA)"}}]}',
+        '',
+        'data: [DONE]',
+        ''
+      ].join('\n')
+
+      return new Response(body, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/event-stream'
         }
-      )
+      })
     })
 
     vi.stubGlobal('window', {
@@ -97,10 +96,12 @@ describe('requestImageGeneration', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('sends redundant OpenAI and Gemini fields for Gemini image generation', async () => {
+  it('uses the shared Gemini image request path and extracts inlineData images', async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const payload = JSON.parse(String(init?.body))
 
+      expect(payload.model).toBeUndefined()
+      expect(payload.stream).toBe(true)
       expect(payload.messages).toEqual([
         {
           role: 'user',
@@ -116,7 +117,7 @@ describe('requestImageGeneration', () => {
       expect(payload.size).toBe('1024x1024')
       expect(payload.aspect_ratio).toBeUndefined()
       expect(payload.generationConfig).toEqual({
-        responseModalities: ['IMAGE'],
+        responseModalities: ['TEXT', 'IMAGE'],
         imageConfig: {
           imageSize: '1K'
         }
@@ -161,5 +162,40 @@ describe('requestImageGeneration', () => {
 
     expect(result).toBe('data:image/png;base64,BBBB')
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('throws when the shared image request does not return any images', async () => {
+    const fetchMock = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: 'text only'
+              }
+            }
+          ]
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+    })
+
+    vi.stubGlobal('window', {
+      fetch: fetchMock,
+      location: { origin: 'http://localhost' }
+    })
+
+    await expect(
+      requestImageGeneration(openAIProvider, {
+        prompt: 'draw a city skyline',
+        quality: '1K',
+        ratio: 'auto'
+      })
+    ).rejects.toThrow('未返回图片数据')
   })
 })

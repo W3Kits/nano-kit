@@ -1,8 +1,9 @@
 import { useAppStore } from '../store/appStore'
-import { nativeFetch, escapeHtml, buildDynamicImageModel, buildOpenAIUrl, buildGeminiUrl } from '../utils/helpers'
+import { escapeHtml } from '../utils/helpers'
 import type { ImageState } from '../types'
 import * as db from '../utils/db'
-import { buildRedundantImagePayload, createImagePartFromDataUrl } from './image-payloads'
+import { createImagePartFromDataUrl, type RedundantImagePart } from './image-payloads'
+import { requestSharedImage, type SharedImageResult } from './shared-image-request'
 
 export async function sendMessage(text: string, images: ImageState[]) {
   const store = useAppStore.getState()
@@ -46,21 +47,15 @@ export async function sendMessage(text: string, images: ImageState[]) {
   addActiveGeneration(sessionId)
 
   try {
-    let data: any
-
-    if (config.type === 'openai') {
-      data = await callOpenAIAPI(config, text, imagesBase64, {
-        resolution,
-        aspectRatio,
-        enableModelSuffix: config.enableModelSuffix ?? true
-      })
-    } else {
-      data = await callGeminiAPI(config, text, imagesBase64, {
-        resolution,
-        aspectRatio,
-        enableModelSuffix: config.enableModelSuffix ?? true
-      })
-    }
+    const data = await requestSharedImage(config, {
+      prompt: text || 'Generate image',
+      images: toSharedImageParts(images),
+      resolution,
+      aspectRatio,
+      enableModelSuffix: config.enableModelSuffix ?? true,
+      stream: true,
+      responseModalities: ['TEXT', 'IMAGE']
+    })
 
     // Process response
     await processResponse(data, sessionId)
@@ -81,206 +76,24 @@ export async function sendMessage(text: string, images: ImageState[]) {
   }
 }
 
-async function callOpenAIAPI(
-  config: any,
-  text: string,
-  imagesBase64: string[],
-  options: any
-) {
-  const { resolution, aspectRatio, enableModelSuffix = true } = options
-  const model = buildDynamicImageModel(config.imageModel, resolution, aspectRatio, enableModelSuffix)
-  const payload: any = {
-    model,
-    ...buildRedundantImagePayload({
-      prompt: text || 'Generate image',
-      images: imagesBase64.map((b64) => createImagePartFromDataUrl(`data:image/jpeg;base64,${b64}`)),
-      resolution,
-      aspectRatio,
-      stream: true,
-      responseModalities: ['TEXT', 'IMAGE']
-    })
-  }
-
-  const res = await nativeFetch(buildOpenAIUrl(config.host, '/chat/completions'), {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${config.key}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(payload)
-  })
-
-  if (!res.ok) {
-    const errorText = await res.text()
-    throw new Error(errorText)
-  }
-
-  const contentType = res.headers.get('content-type') || ''
-  if (contentType.includes('text/event-stream')) {
-    return await parseStreamResponse(res)
-  }
-
-  return await res.json()
-}
-
-async function callGeminiAPI(
-  config: any,
-  text: string,
-  imagesBase64: string[],
-  options: any
-) {
-  const { resolution, aspectRatio, enableModelSuffix = true } = options
-  const model = buildDynamicImageModel(config.imageModel, resolution, aspectRatio, enableModelSuffix)
-  const payload = {
-    ...buildRedundantImagePayload({
-      prompt: text || 'Generate image',
-      images: imagesBase64.map((b64) => createImagePartFromDataUrl(`data:image/jpeg;base64,${b64}`)),
-      resolution,
-      aspectRatio,
-      stream: true,
-      responseModalities: ['TEXT', 'IMAGE']
-    })
-  }
-
-  const res = await nativeFetch(
-    buildGeminiUrl(config.host, `/models/${model}:generateContent`),
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': config.key
-      },
-      body: JSON.stringify(payload)
-    }
-  )
-
-  const data = await res.json()
-  if (!res.ok) throw new Error(JSON.stringify(data))
-
-  return data
-}
-
-async function parseStreamResponse(response: Response) {
-  const reader = response.body!.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let fullContent = ''
-
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() || ''
-
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        const data = line.slice(6).trim()
-        if (data === '[DONE]') continue
-
-        try {
-          const json = JSON.parse(data)
-          if (json.choices?.[0]?.delta?.content) {
-            fullContent += json.choices[0].delta.content
-          }
-        } catch (e) {
-          console.warn('Parse SSE error:', e)
-        }
-      }
-    }
-  }
-
-  return {
-    choices: [{
-      message: { content: fullContent }
-    }]
-  }
-}
-
-async function processResponse(data: any, sessionId: number) {
+async function processResponse(data: SharedImageResult, sessionId: number) {
   const store = useAppStore.getState()
   const { saveMessage, bumpGalleryRefreshKey } = store
 
   let botHtml = ''
   const generatedImages: string[] = []
 
-  // Handle OpenAI format
-  if (data.choices?.[0]?.message?.content) {
-    const content = data.choices[0].message.content
-
-    // Extract images from markdown
-    const dataUrlMatch = content.match(/!\[.*?\]\((data:image\/[^)]+)\)/)
-    const httpUrlMatch = content.match(/!\[.*?\]\((https?:\/\/[^)]+)\)/)
-
-    if (dataUrlMatch) {
-      const imageData = dataUrlMatch[1].split(',')[1]
-      generatedImages.push(imageData)
-      const fullBase64 = dataUrlMatch[1]
-      const filename = `gemini_${Date.now()}.png`
-
-      botHtml += createImageHtml(fullBase64, filename)
-    } else if (httpUrlMatch) {
-      // Fetch remote image
-      try {
-        const imgRes = await nativeFetch(httpUrlMatch[1])
-        const blob = await imgRes.blob()
-        const reader = new FileReader()
-        const base64 = await new Promise<string>((resolve) => {
-          reader.onloadend = () => resolve((reader.result as string).split(',')[1])
-          reader.readAsDataURL(blob)
-        })
-        generatedImages.push(base64)
-        const fullBase64 = `data:image/jpeg;base64,${base64}`
-        const filename = `gemini_${Date.now()}.png`
-        botHtml += createImageHtml(fullBase64, filename)
-      } catch (e) {
-        console.error('Failed to fetch image:', e)
-      }
-    }
-
-    // Extract text content
-    const textContent = content
-      .replace(/!\[.*?\]\((data:image\/[^)]+)\)/g, '')
-      .replace(/!\[.*?\]\((https?:\/\/[^)]+)\)/g, '')
-      .trim()
-
-    if (textContent) {
-      botHtml = `<div class="msg-content" style="padding:12px 18px; white-space:pre-wrap;">${escapeHtml(textContent)}</div>` + botHtml
-    }
+  const textContent = typeof data.text === 'string' ? data.text.trim() : ''
+  if (textContent) {
+    botHtml += `<div class="msg-content" style="padding:12px 18px; white-space:pre-wrap;">${escapeHtml(textContent)}</div>`
   }
 
-  // Handle Gemini format
-  if (data.candidates?.[0]?.content?.parts) {
-    data.candidates[0].content.parts.forEach((part: any) => {
-      if (part.inlineData?.mimeType?.startsWith('image/')) {
-        const fullBase64 = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`
-        generatedImages.push(part.inlineData.data)
-        const filename = `gemini_${Date.now()}.png`
-        botHtml += createImageHtml(fullBase64, filename)
-      } else if (part.text) {
-        // Check for embedded images in text
-        const imgRegex = /!\[([^\]]*)\]\(((?:https?:|data:image\/)[^)]+)\)/g
-        let textContent = part.text
-        let match
+  for (const image of data.images || []) {
+    const normalized = normalizeGeneratedImage(image)
+    if (!normalized) continue
 
-        while ((match = imgRegex.exec(textContent)) !== null) {
-          const url = match[2]
-          const filename = `image_${Date.now()}.png`
-
-          if (url.startsWith('data:')) {
-            const base64Data = url.split(',')[1]
-            if (base64Data) generatedImages.push(base64Data)
-            botHtml += createImageHtml(url, filename)
-          }
-        }
-
-        textContent = textContent.replace(imgRegex, '').trim()
-        if (textContent) {
-          botHtml += `<div class="msg-content" style="padding:12px 18px;"><details class="thought-box"><summary>Thinking / Output</summary><div>${escapeHtml(textContent)}</div></details></div>`
-        }
-      }
-    })
+    generatedImages.push(normalized.base64)
+    botHtml += createImageHtml(normalized.dataUrl, `image_${Date.now()}.png`)
   }
 
   if (botHtml) {
@@ -288,6 +101,39 @@ async function processResponse(data: any, sessionId: number) {
     bumpGalleryRefreshKey()
     store.showToast('生成完成', 'success')
   }
+}
+
+function toSharedImageParts(images: Array<ImageState | string>): RedundantImagePart[] {
+  return images
+    .map((image) => {
+      if (typeof image === 'string') {
+        return createImagePartFromDataUrl(normalizeDataUrl(image, 'image/jpeg'))
+      }
+
+      const dataUrl = image.preview || `data:${image.mimeType};base64,${image.base64}`
+      return createImagePartFromDataUrl(dataUrl)
+    })
+    .filter((part) => Boolean(part.base64Data))
+}
+
+function normalizeGeneratedImage(image: string): { dataUrl: string; base64: string } | null {
+  if (!image) return null
+
+  if (image.startsWith('data:')) {
+    const base64 = image.split(',')[1]
+    if (!base64) return null
+    return { dataUrl: image, base64 }
+  }
+
+  return {
+    dataUrl: normalizeDataUrl(image, 'image/png'),
+    base64: image
+  }
+}
+
+function normalizeDataUrl(value: string, mimeType: string): string {
+  if (value.startsWith('data:')) return value
+  return `data:${mimeType};base64,${value}`
 }
 
 function createImageHtml(fullBase64: string, filename: string): string {

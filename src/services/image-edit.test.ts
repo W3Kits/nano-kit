@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Provider } from '@/types'
-import { requestImageEdit } from './image-edit'
+
+const requestSharedImage = vi.fn()
+
+vi.mock('./shared-image-request', () => ({
+  requestSharedImage
+}))
 
 const provider: Provider = {
   id: 'p1',
@@ -17,203 +22,19 @@ const provider: Provider = {
   enableModelSuffix: true
 }
 
-const geminiProvider: Provider = {
-  ...provider,
-  id: 'p2',
-  type: 'gemini',
-  textModel: 'gemini-3-flash',
-  imageModel: 'gemini-3-pro-image'
-}
-
 describe('requestImageEdit', () => {
   afterEach(() => {
-    vi.unstubAllGlobals()
+    requestSharedImage.mockReset()
   })
 
-  it('parses OpenAI image edit SSE responses when stream mode is enabled', async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const payload = JSON.parse(String(init?.body))
-      expect(payload.stream).toBe(true)
-      expect(payload.messages).toEqual([
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: [
-                'You are performing localized image editing.',
-                'Only modify the selected rectangle and preserve all pixels outside that area as much as possible.',
-                'Use the original full image as global context.',
-                'Pixel rectangle: x=10, y=20, width=30, height=40.',
-                'Normalized rectangle: x=0.1000, y=0.2000, width=0.3000, height=0.4000.',
-                'Edit request: remove the logo'
-              ].join('\n')
-            },
-            {
-              type: 'image_url',
-              image_url: {
-                url: 'data:image/png;base64,BBBB'
-              }
-            }
-          ]
-        }
-      ])
-      expect(payload.contents).toEqual([
-        {
-          role: 'user',
-          parts: [
-            {
-              text: [
-                'You are performing localized image editing.',
-                'Only modify the selected rectangle and preserve all pixels outside that area as much as possible.',
-                'Use the original full image as global context.',
-                'Pixel rectangle: x=10, y=20, width=30, height=40.',
-                'Normalized rectangle: x=0.1000, y=0.2000, width=0.3000, height=0.4000.',
-                'Edit request: remove the logo'
-              ].join('\n')
-            },
-            {
-              inline_data: {
-                mime_type: 'image/png',
-                data: 'BBBB'
-              }
-            }
-          ]
-        }
-      ])
-      expect(payload.generationConfig).toEqual({
-        responseModalities: ['TEXT', 'IMAGE'],
-        imageConfig: {
-          imageSize: '2K'
-        }
-      })
-
-      const body = [
-        'data: {"choices":[{"delta":{"content":"![result](data:image/png;base64,AAAA)"}}]}',
-        '',
-        'data: [DONE]',
-        ''
-      ].join('\n')
-
-      return new Response(body, {
-        status: 200,
-        headers: {
-          'Content-Type': 'text/event-stream'
-        }
-      })
+  it('uses the shared image request payload with the edit prompt and original image', async () => {
+    requestSharedImage.mockResolvedValue({
+      images: ['data:image/png;base64,AAAA'],
+      text: 'ok'
     })
 
-    vi.stubGlobal('window', {
-      fetch: fetchMock,
-      location: { origin: 'http://localhost' }
-    })
-
+    const { requestImageEdit } = await import('./image-edit')
     const result = await requestImageEdit(provider, {
-      originalImage: 'data:image/png;base64,BBBB',
-      selectionRect: { x: 10, y: 20, width: 30, height: 40 },
-      selectionRectNormalized: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 },
-      prompt: 'remove the logo',
-      resolution: '2K',
-      aspectRatio: 'auto',
-      enableModelSuffix: true
-    })
-
-    expect(result).toBe('data:image/png;base64,AAAA')
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-  })
-
-  it('sends redundant OpenAI and Gemini fields for Gemini image edit requests', async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const payload = JSON.parse(String(init?.body))
-
-      expect(payload.messages).toEqual([
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: [
-                'You are performing localized image editing.',
-                'Only modify the selected rectangle and preserve all pixels outside that area as much as possible.',
-                'Use the original full image as global context.',
-                'Pixel rectangle: x=10, y=20, width=30, height=40.',
-                'Normalized rectangle: x=0.1000, y=0.2000, width=0.3000, height=0.4000.',
-                'Edit request: remove the logo'
-              ].join('\n')
-            },
-            {
-              type: 'image_url',
-              image_url: {
-                url: 'data:image/png;base64,BBBB'
-              }
-            }
-          ]
-        }
-      ])
-      expect(payload.contents).toEqual([
-        {
-          role: 'user',
-          parts: [
-            {
-              text: [
-                'You are performing localized image editing.',
-                'Only modify the selected rectangle and preserve all pixels outside that area as much as possible.',
-                'Use the original full image as global context.',
-                'Pixel rectangle: x=10, y=20, width=30, height=40.',
-                'Normalized rectangle: x=0.1000, y=0.2000, width=0.3000, height=0.4000.',
-                'Edit request: remove the logo'
-              ].join('\n')
-            },
-            {
-              inline_data: {
-                mime_type: 'image/png',
-                data: 'BBBB'
-              }
-            }
-          ]
-        }
-      ])
-      expect(payload.generationConfig).toEqual({
-        responseModalities: ['TEXT', 'IMAGE'],
-        imageConfig: {
-          imageSize: '2K',
-          aspectRatio: '16:9'
-        }
-      })
-      expect(payload.aspect_ratio).toBe('16:9')
-
-      return new Response(
-        JSON.stringify({
-          candidates: [
-            {
-              content: {
-                parts: [
-                  {
-                    inlineData: {
-                      mimeType: 'image/png',
-                      data: 'CCCC'
-                    }
-                  }
-                ]
-              }
-            }
-          ]
-        }),
-        {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        }
-      )
-    })
-
-    vi.stubGlobal('window', {
-      fetch: fetchMock,
-      location: { origin: 'http://localhost' }
-    })
-
-    const result = await requestImageEdit(geminiProvider, {
       originalImage: 'data:image/png;base64,BBBB',
       selectionRect: { x: 10, y: 20, width: 30, height: 40 },
       selectionRectNormalized: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 },
@@ -223,7 +44,48 @@ describe('requestImageEdit', () => {
       enableModelSuffix: true
     })
 
-    expect(result).toBe('data:image/png;base64,CCCC')
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(result).toBe('data:image/png;base64,AAAA')
+    expect(requestSharedImage).toHaveBeenCalledTimes(1)
+    expect(requestSharedImage).toHaveBeenCalledWith(provider, {
+      prompt: [
+        'You are performing localized image editing.',
+        'Only modify the selected rectangle and preserve all pixels outside that area as much as possible.',
+        'Use the original full image as global context.',
+        'Pixel rectangle: x=10, y=20, width=30, height=40.',
+        'Normalized rectangle: x=0.1000, y=0.2000, width=0.3000, height=0.4000.',
+        'Edit request: remove the logo'
+      ].join('\n'),
+      images: [
+        {
+          dataUrl: 'data:image/png;base64,BBBB',
+          mimeType: 'image/png',
+          base64Data: 'BBBB'
+        }
+      ],
+      resolution: '2K',
+      aspectRatio: '16:9',
+      enableModelSuffix: true,
+      stream: true,
+      responseModalities: ['TEXT', 'IMAGE']
+    })
+  })
+
+  it('throws when the shared image request returns no image data', async () => {
+    requestSharedImage.mockResolvedValue({
+      images: [],
+      text: 'missing image'
+    })
+
+    const { requestImageEdit } = await import('./image-edit')
+
+    await expect(requestImageEdit(provider, {
+      originalImage: 'data:image/png;base64,BBBB',
+      selectionRect: { x: 10, y: 20, width: 30, height: 40 },
+      selectionRectNormalized: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 },
+      prompt: 'remove the logo',
+      resolution: '2K',
+      aspectRatio: 'auto',
+      enableModelSuffix: true
+    })).rejects.toThrow('未返回图片数据')
   })
 })
