@@ -1,6 +1,13 @@
 import type { Provider } from '@/types'
 import { buildDynamicImageModel, buildGeminiUrl, buildOpenAIUrl, nativeFetch } from '@/utils/helpers'
 import { buildRedundantImagePayload } from './image-payloads'
+import {
+  getW3KitsOpenAiBaseUrl,
+  getW3KitsOpenAiHeaders,
+  isManagedOpenAiProvider,
+  isW3KitsLoginRequired,
+  requestW3KitsLogin
+} from '@/lib/w3kits-runtime'
 
 export interface SharedImageRequestInput {
   prompt: string
@@ -30,12 +37,17 @@ export async function requestSharedImage(
   const payload = buildRedundantImagePayload(input)
 
   if (config.type === 'openai') {
-    const res = await nativeFetch(buildOpenAIUrl(config.host, '/chat/completions'), {
+    const useManagedAuth = isManagedOpenAiProvider(config)
+    const headers = useManagedAuth
+      ? await getW3KitsOpenAiHeaders()
+      : {
+          Authorization: `Bearer ${config.key}`,
+          'Content-Type': 'application/json'
+        }
+
+    const res = await nativeFetch(buildOpenAIUrl(useManagedAuth ? getW3KitsOpenAiBaseUrl() : config.host, '/chat/completions'), {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.key}`,
-        'Content-Type': 'application/json'
-      },
+      headers,
       body: JSON.stringify({
         model,
         ...payload
@@ -44,6 +56,10 @@ export async function requestSharedImage(
 
     if (!res.ok) {
       const error = await parseOpenAIError(res)
+      if (useManagedAuth && isW3KitsLoginRequired(error, res.status)) {
+        requestW3KitsLogin('ai_request')
+        throw new Error('Sign in required before using the default OpenAI-compatible provider.')
+      }
       throw new Error(error || `HTTP ${res.status}`)
     }
 

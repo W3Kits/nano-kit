@@ -2,6 +2,13 @@ import type { StateCreator } from 'zustand'
 import type { Provider } from '../../types'
 import type { AppState } from '../appStore'
 import { safeStorageGet, scheduleStorageWrite } from '../utils/storage'
+import {
+  getW3KitsOpenAiBaseUrl,
+  isW3KitsRuntime,
+  W3KITS_MANAGED_OPENAI_KEY,
+  W3KITS_DEFAULT_IMAGE_MODEL,
+  W3KITS_DEFAULT_TEXT_MODEL
+} from '@/lib/w3kits-runtime'
 
 export interface ProviderSlice {
   providers: Provider[]
@@ -18,6 +25,25 @@ export interface ProviderSlice {
 const PROVIDERS_KEY = 'gemini_providers'
 const ACTIVE_IMAGE_KEY = 'gemini_active_provider'
 const ACTIVE_TEXT_KEY = 'gemini_active_text_provider'
+const W3KITS_PROVIDER_ID = 'openai_default'
+
+function createW3KitsProvider(): Provider {
+  return {
+    id: W3KITS_PROVIDER_ID,
+    name: 'OpenAI Compatible',
+    type: 'openai',
+    host: getW3KitsOpenAiBaseUrl(),
+    key: W3KITS_MANAGED_OPENAI_KEY,
+    textModel: W3KITS_DEFAULT_TEXT_MODEL,
+    imageModel: W3KITS_DEFAULT_IMAGE_MODEL,
+    capabilities: { image: true, text: true },
+    enableModelSuffix: false
+  }
+}
+
+function persistableProviders(providers: Provider[]): Provider[] {
+  return providers
+}
 
 const normalizeProviders = (rawProviders: any[]) => {
   let didMutate = false
@@ -28,6 +54,10 @@ const normalizeProviders = (rawProviders: any[]) => {
       return valid
     })
     .map((p: any) => {
+      const nextType =
+        p.type === 'w3kits'
+          ? 'openai'
+          : (p.type === 'openai' || p.type === 'gemini' ? p.type : 'openai')
       const caps = {
         image: p.capabilities?.image ?? true,
         text: p.capabilities?.text ?? false
@@ -47,6 +77,7 @@ const normalizeProviders = (rawProviders: any[]) => {
       const { model: _legacyModel, ...rest } = p
       return {
         ...rest,
+        type: nextType,
         imageModel,
         textModel,
         capabilities: caps
@@ -72,6 +103,17 @@ export const createProviderSlice: StateCreator<AppState, [], [], ProviderSlice> 
         const parsed = raw ? JSON.parse(raw) : []
         const rawProviders = Array.isArray(parsed) ? parsed : []
         let { providers, didMutate } = normalizeProviders(rawProviders)
+        if (isW3KitsRuntime()) {
+          const managed = createW3KitsProvider()
+          const existingManaged = providers.find((provider) => provider.id === W3KITS_PROVIDER_ID)
+          providers = [
+            existingManaged
+              ? { ...existingManaged, ...managed }
+              : managed,
+            ...providers.filter((provider) => provider.id !== W3KITS_PROVIDER_ID)
+          ]
+          didMutate = true
+        }
 
         let activeId = safeStorageGet(ACTIVE_IMAGE_KEY) || ''
         let activeTextId = safeStorageGet(ACTIVE_TEXT_KEY) || ''
@@ -108,7 +150,7 @@ export const createProviderSlice: StateCreator<AppState, [], [], ProviderSlice> 
         scheduleWrite(ACTIVE_TEXT_KEY, activeTextId)
 
         if (didMutate) {
-          scheduleWrite(PROVIDERS_KEY, JSON.stringify(providers))
+          scheduleWrite(PROVIDERS_KEY, JSON.stringify(persistableProviders(providers)))
         }
 
         set({ providers, activeProviderId: activeId, activeTextProviderId: activeTextId })
@@ -147,7 +189,7 @@ export const createProviderSlice: StateCreator<AppState, [], [], ProviderSlice> 
         newProviders = [...providers, newProvider as Provider]
       }
 
-      scheduleWrite(PROVIDERS_KEY, JSON.stringify(newProviders))
+      scheduleWrite(PROVIDERS_KEY, JSON.stringify(persistableProviders(newProviders)))
       set({ providers: newProviders })
       get().showToast('渠道已保存', 'success')
       return id
@@ -155,7 +197,7 @@ export const createProviderSlice: StateCreator<AppState, [], [], ProviderSlice> 
     deleteProvider: (id) => {
       const { providers, activeProviderId, activeTextProviderId } = get()
       const newProviders = providers.filter(p => p.id !== id)
-      scheduleWrite(PROVIDERS_KEY, JSON.stringify(newProviders))
+      scheduleWrite(PROVIDERS_KEY, JSON.stringify(persistableProviders(newProviders)))
 
       const pickFirst = (capability: 'image' | 'text') =>
         newProviders.find(p => (capability === 'image' ? p.capabilities?.image : p.capabilities?.text))?.id || ''

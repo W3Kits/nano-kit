@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom'
+import { LogoMark } from '../ui/Logo'
 import { useAppStore } from '../../store/appStore'
 
 export default function LeftSidebar() {
@@ -28,7 +29,7 @@ export default function LeftSidebar() {
         <div className={`px-4 pt-4 pb-3 border-b border-[var(--border-color)] ${leftSidebarCollapsed ? 'lg:px-3' : ''}`}>
           <div className={`flex items-center gap-3 px-2 py-2.5 ${leftSidebarCollapsed ? 'lg:justify-center lg:px-0' : ''}`}>
             <div className="w-10 h-10 rounded-2xl bg-[var(--bg-primary)] border border-[var(--border-color)] flex items-center justify-center">
-              <img src="/logo.png" alt="logo" className="w-6 h-6 object-contain" />
+              <LogoMark className="w-6 h-6 text-[var(--text-primary)]" />
             </div>
             <div className={`leading-tight min-w-0 ${leftSidebarCollapsed ? 'lg:hidden' : ''}`}>
               <div className="font-semibold text-sm truncate lowercase tracking-tight">nano kit</div>

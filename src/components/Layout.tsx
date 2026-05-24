@@ -8,6 +8,7 @@ import { PageHeaderProvider } from './layout/PageHeaderContext'
 import BananaModal from './modals/BananaModal'
 import ConfirmDialog from './ui/ConfirmDialog'
 import SettingsModal from './modals/SettingsModal'
+import { isW3KitsRuntime } from '@/lib/w3kits-runtime'
 
 const HomePage = lazy(() => import('../pages/HomePage'))
 const GeneratePage = lazy(() => import('../pages/GeneratePage'))
@@ -20,6 +21,7 @@ const ImageEditorPage = lazy(() => import('../pages/ImageEditorPage'))
 
 export default function Layout() {
   const { dbReady, dbInitializing, dbError, retryInitDB, resetDB } = useAppStore()
+  const shouldBypassDbGate = isW3KitsRuntime()
 
   return (
     <div className="h-full flex flex-col text-[var(--text-primary)]">
@@ -36,7 +38,7 @@ export default function Layout() {
           <PageHeaderProvider>
             <DesktopHeader />
             <div className="flex-1 overflow-hidden">
-              {dbReady ? (
+              {dbReady || shouldBypassDbGate ? (
                 <Suspense fallback={<PageFallback text="页面加载中..." />}>
                   <Routes>
                     <Route path="/" element={<GeneratePage />} />

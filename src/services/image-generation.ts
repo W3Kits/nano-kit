@@ -1,6 +1,13 @@
 import type { Provider } from '../types'
 import { buildGeminiUrl, buildOpenAIUrl, nativeFetch } from '../utils/helpers'
 import { requestSharedImage } from './shared-image-request'
+import {
+  getW3KitsOpenAiBaseUrl,
+  getW3KitsOpenAiHeaders,
+  isManagedOpenAiProvider,
+  isW3KitsLoginRequired,
+  requestW3KitsLogin
+} from '@/lib/w3kits-runtime'
 
 export type ImageQuality = '1K' | '2K' | '4K'
 
@@ -23,12 +30,17 @@ export async function requestTextGeneration(
   const { systemPrompt, userPrompt } = input
 
   if (config.type === 'openai') {
-    const res = await nativeFetch(buildOpenAIUrl(config.host, '/chat/completions'), {
+    const useManagedAuth = isManagedOpenAiProvider(config)
+    const headers = useManagedAuth
+      ? await getW3KitsOpenAiHeaders()
+      : {
+          Authorization: `Bearer ${config.key}`,
+          'Content-Type': 'application/json'
+        }
+
+    const res = await nativeFetch(buildOpenAIUrl(useManagedAuth ? getW3KitsOpenAiBaseUrl() : config.host, '/chat/completions'), {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.key}`,
-        'Content-Type': 'application/json'
-      },
+      headers,
       body: JSON.stringify({
         model: config.textModel,
         stream: false,
@@ -45,7 +57,14 @@ export async function requestTextGeneration(
       })
     })
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    if (!res.ok) {
+      const payload = await res.json().catch(() => ({}))
+      if (useManagedAuth && isW3KitsLoginRequired(payload, res.status)) {
+        requestW3KitsLogin('ai_request')
+        throw new Error('Sign in required before using the default OpenAI-compatible provider.')
+      }
+      throw new Error(`HTTP ${res.status}`)
+    }
 
     const data = await res.json()
     if (data.error) throw new Error(data.error.message)

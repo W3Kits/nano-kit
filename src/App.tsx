@@ -4,6 +4,7 @@ import Layout from './components/Layout'
 import Toast from './components/ui/Toast'
 import Lightbox from './components/ui/Lightbox'
 import GlobalLoading from './components/ui/GlobalLoading'
+import { hydratePersistentStorage } from './store/utils/storage'
 
 function App() {
   const { theme, initTheme, initProviders, initDB } = useAppStore()
@@ -27,13 +28,13 @@ function App() {
   }, [])
 
   useEffect(() => {
-    initTheme()
-    initProviders()
-  }, [initTheme, initProviders])
-
-  useEffect(() => {
-    initDB()
-  }, [initDB])
+    void (async () => {
+      await hydratePersistentStorage()
+      initTheme()
+      initProviders()
+      await initDB()
+    })()
+  }, [initDB, initProviders, initTheme])
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')

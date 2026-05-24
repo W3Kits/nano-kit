@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/appStore'
 import type { CustomPrompt } from '../types'
 import { usePageHeader } from '../components/layout/PageHeaderContext'
+import { loadCustomPrompts, saveCustomPrompts } from '@/lib/custom-prompts'
 
 export default function MyPromptsPage() {
   const navigate = useNavigate()
@@ -16,10 +17,9 @@ export default function MyPromptsPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [formData, setFormData] = useState({ title: '', content: '' })
 
-  const loadPrompts = useCallback(() => {
+  const loadPrompts = useCallback(async () => {
     try {
-      const saved = JSON.parse(localStorage.getItem('custom_prompts') || '[]')
-      setPrompts(Array.isArray(saved) ? saved : [])
+      setPrompts(await loadCustomPrompts())
     } catch (e) {
       console.error('Failed to load prompts:', e)
       setPrompts([])
@@ -27,13 +27,13 @@ export default function MyPromptsPage() {
   }, [])
 
   useEffect(() => {
-    loadPrompts()
+    void loadPrompts()
   }, [loadPrompts])
 
   const headerActions = useMemo(() => (
     <button
       onClick={() => {
-        loadPrompts()
+        void loadPrompts()
         showToast('已刷新', 'success')
       }}
       className="shrink-0 px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-sm shadow-sm hover:bg-[var(--bg-tertiary)] transition-colors"
@@ -51,8 +51,8 @@ export default function MyPromptsPage() {
     return () => setHeader(null)
   }, [setHeader, headerActions])
 
-  const savePrompts = (newPrompts: CustomPrompt[]) => {
-    localStorage.setItem('custom_prompts', JSON.stringify(newPrompts))
+  const persistPrompts = async (newPrompts: CustomPrompt[]) => {
+    await saveCustomPrompts(newPrompts)
     setPrompts(newPrompts)
   }
 
@@ -73,9 +73,10 @@ export default function MyPromptsPage() {
           ? { ...p, title: formData.title, content: formData.content, updatedAt: Date.now() }
           : p
       )
-      savePrompts(updated)
-      showToast('更新成功', 'success')
-      clearForm()
+      void persistPrompts(updated).then(() => {
+        showToast('更新成功', 'success')
+        clearForm()
+      })
       return
     }
 
@@ -86,9 +87,10 @@ export default function MyPromptsPage() {
       createdAt: Date.now(),
       updatedAt: Date.now()
     }
-    savePrompts([newPrompt, ...prompts])
-    showToast('保存成功', 'success')
-    clearForm()
+    void persistPrompts([newPrompt, ...prompts]).then(() => {
+      showToast('保存成功', 'success')
+      clearForm()
+    })
   }
 
   const handleDelete = (id: string) => {
@@ -97,8 +99,9 @@ export default function MyPromptsPage() {
       message: '确定删除这条提示词吗？',
       type: 'danger',
       onConfirm: () => {
-        savePrompts(prompts.filter(p => p.id !== id))
-        showToast('已删除', 'success')
+        void persistPrompts(prompts.filter(p => p.id !== id)).then(() => {
+          showToast('已删除', 'success')
+        })
       }
     })
   }
@@ -140,7 +143,7 @@ export default function MyPromptsPage() {
           </div>
           <button
             onClick={() => {
-              loadPrompts()
+              void loadPrompts()
               showToast('已刷新', 'success')
             }}
             className="shrink-0 px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-sm shadow-sm hover:bg-[var(--bg-tertiary)] transition-colors"

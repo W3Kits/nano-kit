@@ -1,13 +1,37 @@
 {
-  "name": "nano kit",
-  "private": true,
-  "version": "1.0.0",
+  "name": "@w3kits/plugin-nano-kit",
+  "private": false,
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node scripts/prepare-dist.mjs",
+    "prepare:dist": "node scripts/prepare-dist.mjs",
+    "pack:dry-run": "npm pack --json --dry-run",
+    "pack:artifact": "npm pack --json",
     "preview": "vite preview",
     "test": "vitest run"
+  },
+  "description": "AI toolkit for writing, visuals, and lightweight creative workflows.",
+  "license": "UNLICENSED",
+  "author": "W3Kits",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liujuntao123/nano-kit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/liujuntao123/nano-kit/issues"
+  },
+  "homepage": "https://github.com/liujuntao123/nano-kit#readme",
+  "engines": {
+    "node": ">=22.12.0"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",

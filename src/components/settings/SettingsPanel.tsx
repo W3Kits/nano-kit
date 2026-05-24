@@ -1,16 +1,23 @@
 import { useMemo, useState } from 'react'
 import { useAppStore } from '@/store/appStore'
 import type { Provider } from '@/types'
+import {
+  getW3KitsOpenAiBaseUrl,
+  isManagedOpenAiProvider,
+  W3KITS_DEFAULT_IMAGE_MODEL,
+  W3KITS_DEFAULT_TEXT_MODEL,
+  W3KITS_MANAGED_OPENAI_KEY
+} from '@/lib/w3kits-runtime'
 
 function getEmptyForm(): Partial<Provider> {
   return {
     id: '',
     name: '',
-    type: 'gemini',
-    host: '',
+    type: 'openai',
+    host: getW3KitsOpenAiBaseUrl(),
     key: '',
-    textModel: 'gemini-3-flash',
-    imageModel: 'gemini-3-pro-image',
+    textModel: W3KITS_DEFAULT_TEXT_MODEL,
+    imageModel: W3KITS_DEFAULT_IMAGE_MODEL,
     capabilities: { image: true, text: true },
     enableModelSuffix: false
   }
@@ -30,6 +37,7 @@ export default function SettingsPanel() {
   } = useAppStore()
 
   const [formData, setFormData] = useState<Partial<Provider>>(getEmptyForm())
+  const isManagedRuntimeProvider = isManagedOpenAiProvider(formData)
 
   const providerById = useMemo(() => {
     const map = new Map<string, Provider>()
@@ -52,12 +60,16 @@ export default function SettingsPanel() {
   }
 
   const handleSave = () => {
+    const resolvedKey =
+      isManagedRuntimeProvider && !(formData.key || '').trim()
+        ? W3KITS_MANAGED_OPENAI_KEY
+        : (formData.key || '').trim()
     const payload = {
       id: formData.id,
       name: (formData.name || '').trim(),
-      type: (formData.type || 'gemini') as Provider['type'],
+      type: (formData.type || 'openai') as Provider['type'],
       host: (formData.host || '').trim(),
-      key: (formData.key || '').trim(),
+      key: resolvedKey,
       textModel: (formData.textModel || '').trim(),
       imageModel: (formData.imageModel || '').trim(),
       capabilities: {
@@ -239,7 +251,7 @@ export default function SettingsPanel() {
             {formData.id && (
               <button
                 onClick={handleDelete}
-                className="px-3 py-2 bg-[var(--danger-color)] text-white rounded-xl text-sm hover:opacity-90 transition-opacity shadow-sm"
+                className="px-3 py-2 bg-[var(--danger-color)] text-white rounded-xl text-sm hover:opacity-90 transition-opacity shadow-sm disabled:opacity-40"
               >
                 删除
               </button>
@@ -271,6 +283,7 @@ export default function SettingsPanel() {
                     type="checkbox"
                     checked={formData.capabilities?.image ?? true}
                     onChange={(e) => setCapability('image', e.target.checked)}
+                    disabled={false}
                     className="accent-[var(--accent-color)]"
                   />
                   图片
@@ -280,6 +293,7 @@ export default function SettingsPanel() {
                     type="checkbox"
                     checked={formData.capabilities?.text ?? false}
                     onChange={(e) => setCapability('text', e.target.checked)}
+                    disabled={false}
                     className="accent-[var(--accent-color)]"
                   />
                   文案
@@ -297,10 +311,15 @@ export default function SettingsPanel() {
             <input
               type="password"
               placeholder="API Key"
-              value={formData.key || ''}
+              value={formData.key === W3KITS_MANAGED_OPENAI_KEY ? '' : (formData.key || '')}
               onChange={(e) => setFormData({ ...formData, key: e.target.value })}
               className="w-full px-3 py-2 rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] text-sm shadow-sm"
             />
+            {isManagedRuntimeProvider ? (
+              <div className="text-[11px] text-[var(--text-tertiary)] px-1">
+                当前默认渠道由宿主注入运行时鉴权，界面中不回显密钥。
+              </div>
+            ) : null}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <input
                 type="text"
@@ -329,7 +348,9 @@ export default function SettingsPanel() {
               </div>
               <button
                 type="button"
-                onClick={() => setFormData({ ...formData, enableModelSuffix: !(formData.enableModelSuffix ?? true) })}
+                onClick={() => {
+                  setFormData({ ...formData, enableModelSuffix: !(formData.enableModelSuffix ?? true) })
+                }}
                 className={`relative w-10 h-5 rounded-full transition-colors ${
                   (formData.enableModelSuffix ?? true) ? 'bg-[var(--accent-color)]' : 'bg-[var(--bg-tertiary)]'
                 }`}

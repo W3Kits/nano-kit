@@ -3,6 +3,8 @@ import { useAppStore } from '../../store/appStore'
 import Modal from '../ui/Modal'
 import { nativeFetch } from '../../utils/helpers'
 import type { BananaPrompt, CustomPrompt } from '../../types'
+import { readPersistentJson, writePersistentJson } from '@/lib/persistent-json'
+import { loadCustomPrompts, saveCustomPrompts } from '@/lib/custom-prompts'
 
 const URLS = [
   'https://raw.githubusercontent.com/glidea/banana-prompt-quicker/refs/heads/main/prompts.json',
@@ -10,8 +12,8 @@ const URLS = [
   'https://fastly.jsdelivr.net/gh/glidea/banana-prompt-quicker@main/prompts.json'
 ]
 
-const PROMPTS_CACHE_KEY = 'banana_prompts_cache_v1'
 const PROMPTS_CACHE_TTL_MS = 24 * 60 * 60 * 1000
+const PROMPTS_CACHE_PATH = 'state/banana-prompts-cache.json'
 
 // Extract tags from prompt text
 function extractTags(prompt: string, category: string, mode: string): string[] {
@@ -69,11 +71,13 @@ export default function BananaModal() {
   const [tagFilter, setTagFilter] = useState<string>('all')
   const [searchTerm, setSearchTerm] = useState('')
 
-  const readPromptsCache = (): { data: BananaPrompt[]; expired: boolean } | null => {
+  const readPromptsCache = async (): Promise<{ data: BananaPrompt[]; expired: boolean } | null> => {
     try {
-      const raw = localStorage.getItem(PROMPTS_CACHE_KEY)
-      if (!raw) return null
-      const parsed = JSON.parse(raw)
+      const parsed = await readPersistentJson<{ cachedAt?: number; data?: BananaPrompt[] } | null>(
+        PROMPTS_CACHE_PATH,
+        null
+      )
+      if (!parsed) return null
       const cachedAt = Number(parsed?.cachedAt || 0)
       const data = parsed?.data
       if (!cachedAt || !Array.isArray(data)) return null
@@ -84,12 +88,9 @@ export default function BananaModal() {
     }
   }
 
-  const writePromptsCache = (data: BananaPrompt[]) => {
+  const writePromptsCache = async (data: BananaPrompt[]) => {
     try {
-      localStorage.setItem(
-        PROMPTS_CACHE_KEY,
-        JSON.stringify({ cachedAt: Date.now(), data })
-      )
+      await writePersistentJson(PROMPTS_CACHE_PATH, { cachedAt: Date.now(), data })
     } catch {
       // ignore
     }
@@ -97,24 +98,24 @@ export default function BananaModal() {
 
   useEffect(() => {
     if (bananaModalOpen) {
-      loadSavedPrompts()
+      void loadSavedPrompts()
       if (prompts.length > 0) return
 
-      const cache = readPromptsCache()
-      if (cache && !cache.expired && cache.data.length > 0) {
-        setPrompts(cache.data)
-        return
-      }
+      void (async () => {
+        const cache = await readPromptsCache()
+        if (cache && !cache.expired && cache.data.length > 0) {
+          setPrompts(cache.data)
+          return
+        }
 
-      fetchData()
+        await fetchData()
+      })()
     }
-  }, [bananaModalOpen])
+  }, [bananaModalOpen, prompts.length])
 
-  const loadSavedPrompts = () => {
+  const loadSavedPrompts = async () => {
     try {
-      const saved = JSON.parse(localStorage.getItem('custom_prompts') || '[]')
-      const arr = Array.isArray(saved) ? saved : []
-      setSavedPrompts(arr)
+      setSavedPrompts(await loadCustomPrompts())
     } catch (e) {
       console.error('Failed to load saved prompts:', e)
       setSavedPrompts([])
@@ -125,7 +126,7 @@ export default function BananaModal() {
     setLoading(true)
     setError(false)
 
-    const staleCache = readPromptsCache()
+    const staleCache = await readPromptsCache()
 
     for (const url of URLS) {
       try {
@@ -135,7 +136,7 @@ export default function BananaModal() {
         const data = await res.json()
         if (Array.isArray(data) && data.length > 0) {
           setPrompts(data)
-          writePromptsCache(data)
+          await writePromptsCache(data)
           setLoading(false)
           showToast(`成功加载 ${data.length} 个提示词`, 'success')
           return
@@ -170,37 +171,39 @@ export default function BananaModal() {
   }
 
   const handleSaveToCustom = (item: PromptListItem) => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('custom_prompts') || '[]')
-      const exists = saved.some((p: any) =>
-        p?.title === item.title ||
-        p?.content === item.prompt ||
-        p?.prompt === item.prompt
-      )
+    void (async () => {
+      try {
+        const saved = await loadCustomPrompts()
+        const exists = saved.some((p: any) =>
+          p?.title === item.title ||
+          p?.content === item.prompt ||
+          p?.prompt === item.prompt
+        )
 
-      if (exists) {
-        showToast('该提示词已存在', 'warning')
-        return
+        if (exists) {
+          showToast('该提示词已存在', 'warning')
+          return
+        }
+
+        saved.unshift({
+          id: 'prompt_' + Date.now(),
+          title: item.title,
+          content: item.prompt,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          category: item.category,
+          mode: item.mode,
+          preview: item.preview,
+          author: item.author
+        })
+
+        await saveCustomPrompts(saved)
+        await loadSavedPrompts()
+        showToast('已保存到我的提示词', 'success')
+      } catch (e) {
+        showToast('保存失败', 'error')
       }
-
-      saved.unshift({
-        id: 'prompt_' + Date.now(),
-        title: item.title,
-        content: item.prompt,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        category: item.category,
-        mode: item.mode,
-        preview: item.preview,
-        author: item.author
-      })
-
-      localStorage.setItem('custom_prompts', JSON.stringify(saved))
-      loadSavedPrompts()
-      showToast('已保存到我的提示词', 'success')
-    } catch (e) {
-      showToast('保存失败', 'error')
-    }
+    })()
   }
 
   const savedPromptIndex = useMemo(() => {
