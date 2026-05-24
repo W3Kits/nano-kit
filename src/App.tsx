@@ -29,7 +29,7 @@ function App() {
 
   useEffect(() => {
     void (async () => {
-      await hydratePersistentStorage()
+      await hydratePersistentStorage().catch(() => undefined)
       initTheme()
       initProviders()
       await initDB()

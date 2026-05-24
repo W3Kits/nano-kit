@@ -14,7 +14,7 @@ function localFileKey(path: string): string {
 
 export async function readPersistentJson<T>(path: string, fallback: T): Promise<T> {
   if (isW3KitsRuntime()) {
-    const entry = await readW3KitsStorage(path)
+    const entry = await readW3KitsStorage(path).catch(() => null)
     if (!entry?.body) return fallback
     try {
       return JSON.parse(entry.body) as T
@@ -34,7 +34,9 @@ export async function readPersistentJson<T>(path: string, fallback: T): Promise<
 export async function writePersistentJson(path: string, value: unknown): Promise<void> {
   const text = JSON.stringify(value)
   if (isW3KitsRuntime()) {
-    await writeW3KitsStorage(path, text, 'application/json;charset=UTF-8')
+    await writeW3KitsStorage(path, text, 'application/json;charset=UTF-8').catch(() => {
+      localStorage.setItem(localFileKey(path), text)
+    })
     await syncW3KitsStorage().catch(() => undefined)
     return
   }
@@ -44,7 +46,9 @@ export async function writePersistentJson(path: string, value: unknown): Promise
 
 export async function deletePersistentJson(path: string): Promise<void> {
   if (isW3KitsRuntime()) {
-    await deleteW3KitsStorage(path)
+    await deleteW3KitsStorage(path).catch(() => {
+      localStorage.removeItem(localFileKey(path))
+    })
     await syncW3KitsStorage().catch(() => undefined)
     return
   }
