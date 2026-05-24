@@ -38,21 +38,17 @@ export async function requestSharedImage(
 
   if (config.type === 'openai') {
     const useManagedAuth = isManagedOpenAiProvider(config)
-    const headers = useManagedAuth
+    const baseUrl = useManagedAuth ? getW3KitsOpenAiBaseUrl() : config.host
+    const authHeaders = useManagedAuth
       ? await getW3KitsOpenAiHeaders()
-      : {
-          Authorization: `Bearer ${config.key}`,
-          'Content-Type': 'application/json'
-        }
+      : { Authorization: `Bearer ${config.key}` }
+    const isEditRequest = input.images.length > 0
+    const endpoint = isEditRequest ? '/images/edits' : '/images/generations'
+    const requestInit = isEditRequest
+      ? buildOpenAIImageEditRequest(authHeaders, model, input, payload)
+      : buildOpenAIImageGenerationRequest(authHeaders, model, input, payload)
 
-    const res = await nativeFetch(buildOpenAIUrl(useManagedAuth ? getW3KitsOpenAiBaseUrl() : config.host, '/chat/completions'), {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        model,
-        ...payload
-      })
-    })
+    const res = await nativeFetch(buildOpenAIUrl(baseUrl, endpoint), requestInit)
 
     if (!res.ok) {
       const error = await parseOpenAIError(res)
@@ -89,6 +85,58 @@ export async function requestSharedImage(
   if (data?.error?.message) throw new Error(data.error.message)
 
   return await normalizeSharedImageResult(data)
+}
+
+function buildOpenAIImageGenerationRequest(
+  headers: Record<string, string>,
+  model: string,
+  input: SharedImageRequestInput,
+  payload: any
+): RequestInit {
+  return {
+    method: 'POST',
+    headers: {
+      ...headers,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model,
+      prompt: input.prompt || 'Generate image',
+      n: 1,
+      size: payload.size
+    })
+  }
+}
+
+function buildOpenAIImageEditRequest(
+  headers: Record<string, string>,
+  model: string,
+  input: SharedImageRequestInput,
+  payload: any
+): RequestInit {
+  const formData = new FormData()
+  formData.append('model', model)
+  formData.append('prompt', input.prompt || 'Edit image')
+  formData.append('n', '1')
+  if (payload.size) formData.append('size', payload.size)
+
+  input.images.forEach((image, index) => {
+    formData.append(
+      'image',
+      base64ImageToBlob(image.base64Data, image.mimeType),
+      `image-${index + 1}.${imageExtension(image.mimeType)}`
+    )
+  })
+
+  const formHeaders = { ...headers }
+  delete formHeaders['Content-Type']
+  delete formHeaders['content-type']
+
+  return {
+    method: 'POST',
+    headers: formHeaders,
+    body: formData
+  }
 }
 
 async function parseOpenAIError(response: Response): Promise<string> {
@@ -173,6 +221,23 @@ async function parseOpenAIStreamResponse(response: Response): Promise<any> {
 async function normalizeSharedImageResult(data: any): Promise<SharedImageResult> {
   const images: string[] = []
   const textParts: string[] = []
+
+  if (Array.isArray(data?.data)) {
+    for (const item of data.data) {
+      if (typeof item?.b64_json === 'string' && item.b64_json) {
+        images.push(`data:${item.mime_type || 'image/png'};base64,${item.b64_json}`)
+      }
+
+      if (typeof item?.url === 'string' && item.url) {
+        const remoteImage = await convertRemoteImageToDataUrl(item.url)
+        images.push(remoteImage || item.url)
+      }
+
+      if (typeof item?.revised_prompt === 'string' && item.revised_prompt) {
+        textParts.push(item.revised_prompt)
+      }
+    }
+  }
 
   const openAIContent = data?.choices?.[0]?.message?.content
   if (typeof openAIContent === 'string') {
@@ -273,6 +338,31 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   }
 
   throw new Error('Base64 encoding unavailable')
+}
+
+function base64ImageToBlob(base64Data: string, mimeType: string): Blob {
+  const binary = decodeBase64(base64Data)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return new Blob([bytes], { type: mimeType || 'image/png' })
+}
+
+function decodeBase64(value: string): string {
+  if (typeof atob === 'function') return atob(value)
+
+  const nodeBuffer = (globalThis as any).Buffer
+  if (nodeBuffer) return nodeBuffer.from(value, 'base64').toString('binary')
+
+  throw new Error('Base64 decoding unavailable')
+}
+
+function imageExtension(mimeType: string): string {
+  if (mimeType.includes('jpeg') || mimeType.includes('jpg')) return 'jpg'
+  if (mimeType.includes('webp')) return 'webp'
+  if (mimeType.includes('gif')) return 'gif'
+  return 'png'
 }
 
 function dedupe(values: string[]): string[] {

@@ -45,6 +45,16 @@ function persistableProviders(providers: Provider[]): Provider[] {
   return providers
 }
 
+function isOpenAIImageOnlyModel(model: string): boolean {
+  const value = model.trim().toLowerCase()
+  return value.startsWith('gpt-image-') || value.startsWith('dall-e-')
+}
+
+function normalizeOpenAITextModel(type: string, model: string): string {
+  if (type === 'openai' && isOpenAIImageOnlyModel(model)) return W3KITS_DEFAULT_TEXT_MODEL
+  return model
+}
+
 const normalizeProviders = (rawProviders: any[]) => {
   let didMutate = false
   const providers = rawProviders
@@ -73,6 +83,9 @@ const normalizeProviders = (rawProviders: any[]) => {
 
       if (!imageModel && legacyModel && caps.image) imageModel = legacyModel
       if (!textModel && legacyModel && caps.text) textModel = legacyModel
+      const normalizedTextModel = normalizeOpenAITextModel(nextType, textModel)
+      if (normalizedTextModel !== textModel) didMutate = true
+      textModel = normalizedTextModel
 
       const { model: _legacyModel, ...rest } = p
       return {
@@ -167,8 +180,11 @@ export const createProviderSlice: StateCreator<AppState, [], [], ProviderSlice> 
         image: provider.capabilities?.image ?? true,
         text: provider.capabilities?.text ?? false
       }
-      const legacyModel = (provider as any)?.model
-      const textModel = provider.textModel || (caps.text ? legacyModel : '') || ''
+      const legacyModel = typeof (provider as any)?.model === 'string' ? (provider as any).model : ''
+      const textModel = normalizeOpenAITextModel(
+        provider.type,
+        provider.textModel || (caps.text ? legacyModel : '') || ''
+      )
       const imageModel = provider.imageModel || (caps.image ? legacyModel : '') || ''
 
       const { model: _legacyModel, ...rest } = provider as any

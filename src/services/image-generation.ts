@@ -6,7 +6,8 @@ import {
   getW3KitsOpenAiHeaders,
   isManagedOpenAiProvider,
   isW3KitsLoginRequired,
-  requestW3KitsLogin
+  requestW3KitsLogin,
+  W3KITS_DEFAULT_TEXT_MODEL
 } from '@/lib/w3kits-runtime'
 
 export type ImageQuality = '1K' | '2K' | '4K'
@@ -31,6 +32,7 @@ export async function requestTextGeneration(
 
   if (config.type === 'openai') {
     const useManagedAuth = isManagedOpenAiProvider(config)
+    const textModel = openAITextModel(config.textModel)
     const headers = useManagedAuth
       ? await getW3KitsOpenAiHeaders()
       : {
@@ -42,7 +44,7 @@ export async function requestTextGeneration(
       method: 'POST',
       headers,
       body: JSON.stringify({
-        model: config.textModel,
+        model: textModel,
         stream: false,
         messages: [
           {
@@ -122,6 +124,16 @@ export async function requestImageGeneration(
   if (result.images[0]) return result.images[0]
 
   throw new Error('未返回图片数据')
+}
+
+function openAITextModel(model: string): string {
+  const value = (model || '').trim()
+  return isOpenAIImageOnlyModel(value) ? W3KITS_DEFAULT_TEXT_MODEL : value
+}
+
+function isOpenAIImageOnlyModel(model: string): boolean {
+  const value = model.toLowerCase()
+  return value.startsWith('gpt-image-') || value.startsWith('dall-e-')
 }
 
 export function normalizeModelBlocks(parsed: unknown): any[] {

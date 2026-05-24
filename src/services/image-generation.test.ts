@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Provider } from '@/types'
-import { requestImageGeneration } from './image-generation'
+import { requestImageGeneration, requestTextGeneration } from './image-generation'
 
 const openAIProvider: Provider = {
   id: 'openai-1',
@@ -37,46 +37,22 @@ describe('requestImageGeneration', () => {
     vi.unstubAllGlobals()
   })
 
-  it('uses the shared OpenAI image request path with SSE and mixed TEXT/IMAGE modalities', async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+  it('uses the OpenAI images generation endpoint for image models', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('https://example.com/v1/images/generations')
       const payload = JSON.parse(String(init?.body))
 
       expect(payload.model).toBe('gpt-image-1')
-      expect(payload.stream).toBe(true)
-      expect(payload.messages).toEqual([
-        {
-          role: 'user',
-          content: [{ type: 'text', text: 'draw a city skyline' }]
-        }
-      ])
-      expect(payload.contents).toEqual([
-        {
-          role: 'user',
-          parts: [{ text: 'draw a city skyline' }]
-        }
-      ])
+      expect(payload.prompt).toBe('draw a city skyline')
+      expect(payload.n).toBe(1)
       expect(payload.size).toBe('2048x2048')
-      expect(payload.aspect_ratio).toBe('16:9')
-      expect(payload.generationConfig).toEqual({
-        responseModalities: ['TEXT', 'IMAGE'],
-        imageConfig: {
-          imageSize: '2K',
-          aspectRatio: '16:9'
-        }
-      })
+      expect(payload.messages).toBeUndefined()
+      expect(payload.contents).toBeUndefined()
 
-      const body = [
-        'data: {"choices":[{"delta":{"content":"Scene analysis\\n"}}]}',
-        'data: {"choices":[{"delta":{"content":"![result](data:image/png;base64,AAAA)"}}]}',
-        '',
-        'data: [DONE]',
-        ''
-      ].join('\n')
-
-      return new Response(body, {
+      return new Response(JSON.stringify({ data: [{ b64_json: 'AAAA' }] }), {
         status: 200,
         headers: {
-          'Content-Type': 'text/event-stream'
+          'Content-Type': 'application/json'
         }
       })
     })
@@ -93,6 +69,53 @@ describe('requestImageGeneration', () => {
     })
 
     expect(result).toBe('data:image/png;base64,AAAA')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not send OpenAI image-only models to chat completions', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('https://example.com/v1/chat/completions')
+      const payload = JSON.parse(String(init?.body))
+
+      expect(payload.model).toBe('gpt-5.4-mini')
+      expect(payload.messages).toHaveLength(2)
+
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: 'ok'
+              }
+            }
+          ]
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+    })
+
+    vi.stubGlobal('window', {
+      fetch: fetchMock,
+      location: { origin: 'http://localhost' }
+    })
+
+    const result = await requestTextGeneration(
+      {
+        ...openAIProvider,
+        textModel: 'gpt-image-2'
+      },
+      {
+        systemPrompt: 'system',
+        userPrompt: 'user'
+      }
+    )
+
+    expect(result).toBe('ok')
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
