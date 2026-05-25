@@ -5,8 +5,6 @@ import {
   getW3KitsOpenAiBaseUrl,
   getW3KitsOpenAiHeaders,
   isManagedOpenAiProvider,
-  isW3KitsLoginRequired,
-  requestW3KitsLogin,
   W3KITS_DEFAULT_TEXT_MODEL
 } from '@/lib/w3kits-runtime'
 
@@ -60,11 +58,6 @@ export async function requestTextGeneration(
     })
 
     if (!res.ok) {
-      const payload = await res.json().catch(() => ({}))
-      if (useManagedAuth && isW3KitsLoginRequired(payload, res.status)) {
-        requestW3KitsLogin('ai_request')
-        throw new Error('Sign in required before using the default OpenAI-compatible provider.')
-      }
       throw new Error(`HTTP ${res.status}`)
     }
 

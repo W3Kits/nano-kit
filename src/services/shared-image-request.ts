@@ -5,8 +5,6 @@ import {
   getW3KitsOpenAiBaseUrl,
   getW3KitsOpenAiHeaders,
   isManagedOpenAiProvider,
-  isW3KitsLoginRequired,
-  requestW3KitsLogin
 } from '@/lib/w3kits-runtime'
 
 export interface SharedImageRequestInput {
@@ -52,10 +50,6 @@ export async function requestSharedImage(
 
     if (!res.ok) {
       const error = await parseOpenAIError(res)
-      if (useManagedAuth && isW3KitsLoginRequired(error, res.status)) {
-        requestW3KitsLogin('ai_request')
-        throw new Error('Sign in required before using the default OpenAI-compatible provider.')
-      }
       throw new Error(error || `HTTP ${res.status}`)
     }
 

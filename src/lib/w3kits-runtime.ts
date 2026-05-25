@@ -165,6 +165,30 @@ export function requestW3KitsLogin(reason = 'ai_request') {
   )
 }
 
+
+async function maybePromptLogin(response: Response): Promise<Response> {
+  if (response.ok || (response as Response & { __nanoKitLoginPromptChecked?: boolean }).__nanoKitLoginPromptChecked) return response
+  ;(response as Response & { __nanoKitLoginPromptChecked?: boolean }).__nanoKitLoginPromptChecked = true
+  let payload: unknown = null
+  try {
+    payload = await response.clone().json()
+  } catch {
+    payload = null
+  }
+  if (isW3KitsLoginRequired(payload, response.status)) requestW3KitsLogin('ai_request')
+  return response
+}
+
+export function installW3KitsAuthFetchInterceptor(): void {
+  if (typeof window === 'undefined' || !isW3KitsRuntime()) return
+  const marker = '__nanoKitAuthFetchInterceptorInstalled'
+  const runtimeWindow = window as typeof window & Record<string, boolean>
+  if (runtimeWindow[marker]) return
+  runtimeWindow[marker] = true
+  const nativeFetch = window.fetch.bind(window)
+  window.fetch = async (input, init) => maybePromptLogin(await nativeFetch(input, init))
+}
+
 export async function getW3KitsRuntimeSession(): Promise<W3KitsRuntimeSession> {
   const now = Date.now()
   if (cachedRuntimeSession && cachedRuntimeSession.expiresAt - now > 30000) {
@@ -253,3 +277,5 @@ export async function syncW3KitsStorage(): Promise<{ queued?: boolean; temporary
     pluginId: W3KITS_PLUGIN_ID
   })
 }
+
+installW3KitsAuthFetchInterceptor()
