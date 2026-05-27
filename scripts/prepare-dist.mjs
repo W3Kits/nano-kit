@@ -4,9 +4,9 @@ import path from "node:path";
 const root = process.cwd();
 const dist = path.join(root, "dist");
 const indexHtml = path.join(dist, "index.html");
-const iconSource = path.join(root, "assets", "w3kits-icon.svg");
+const iconSource = path.join(root, "public", "logo-icon.png");
 const w3kitsDir = path.join(dist, "__w3kits");
-const iconTarget = path.join(w3kitsDir, "icon.svg");
+const iconTarget = path.join(w3kitsDir, "icon.png");
 const filesToPrune = [
   "article/elegant.jpeg",
   "article/minimal.jpeg",
@@ -47,7 +47,7 @@ if (!fs.existsSync(indexHtml)) {
 }
 
 if (!fs.existsSync(iconSource)) {
-  throw new Error("Missing W3Kits icon source: assets/w3kits-icon.svg");
+  throw new Error("Missing upstream Nano Kit icon source: public/logo-icon.png");
 }
 
 fs.mkdirSync(w3kitsDir, { recursive: true });

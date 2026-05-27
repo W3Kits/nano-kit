@@ -7,11 +7,14 @@ const W3KITS_BRIDGE_VERSION = 1
 const W3KITS_RESPONSE = 'W3KITS_RESPONSE'
 const W3KITS_AUTH_REQUIRED = 'W3KITS_AUTH_REQUIRED'
 const W3KITS_RUNTIME_SESSION_REQUEST = 'W3KITS_RUNTIME_SESSION_REQUEST'
-const W3KITS_STORAGE_READ = 'W3KITS_STORAGE_READ'
-const W3KITS_STORAGE_WRITE = 'W3KITS_STORAGE_WRITE'
-const W3KITS_STORAGE_DELETE = 'W3KITS_STORAGE_DELETE'
-const W3KITS_STORAGE_LIST = 'W3KITS_STORAGE_LIST'
-const W3KITS_STORAGE_SYNC = 'W3KITS_STORAGE_SYNC'
+
+interface W3KitsObjectFacadeStorage {
+  type: 'w3kits-vfs-object-facade'
+  endpoint: string
+  bucket: string
+  visibleConfigDir?: string
+  auth?: { mode?: string; header?: string }
+}
 
 export interface W3KitsRuntimeSession {
   token: string
@@ -23,6 +26,7 @@ export interface W3KitsRuntimeSession {
   openaiBaseUrl: string
   runtimeSessionHeader: string
   identityHeaders: Record<string, string | undefined>
+  storage?: W3KitsObjectFacadeStorage
 }
 
 interface BridgeErrorShape {
@@ -208,6 +212,54 @@ export async function getW3KitsRuntimeSession(): Promise<W3KitsRuntimeSession> {
   return session
 }
 
+function w3kitsObjectStorage(session: W3KitsRuntimeSession): W3KitsObjectFacadeStorage {
+  const storage = session.storage
+  if (!storage || storage.type !== 'w3kits-vfs-object-facade' || !storage.endpoint || !storage.bucket) {
+    throw new Error('w3kits_object_facade_unavailable')
+  }
+  return storage
+}
+
+function w3kitsObjectUrl(storage: W3KitsObjectFacadeStorage, path: string, options: { formatJson?: boolean; sync?: boolean; list?: boolean } = {}): string {
+  const normalizedPath = String(path || '').replace(/^\/+/, '')
+  const key = normalizedPath.split('/').filter(Boolean).map(encodeURIComponent).join('/')
+  const endpoint = storage.endpoint.replace(/\/+$/, '')
+  const base = new URL(endpoint + '/' + encodeURIComponent(storage.bucket) + (key ? '/' + key : ''), getW3KitsParentOrigin())
+  if (options.formatJson) base.searchParams.set('format', 'json')
+  if (options.list) {
+    base.searchParams.set('list-type', '2')
+    base.searchParams.set('prefix', normalizedPath)
+    base.searchParams.set('format', 'json')
+  }
+  if (options.sync) {
+    base.searchParams.set('sync', '1')
+    base.searchParams.set('format', 'json')
+  }
+  return base.toString()
+}
+
+function w3kitsObjectHeaders(session: W3KitsRuntimeSession, contentType?: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    [session.runtimeSessionHeader || 'x-w3kits-runtime-session']: session.token,
+    'x-w3kits-plugin-id': session.pluginId || W3KITS_PLUGIN_ID,
+    'x-w3kits-plugin-version': session.pluginVersion
+  }
+  if (contentType) headers['Content-Type'] = contentType
+  for (const [key, value] of Object.entries(session.identityHeaders || {})) {
+    if (typeof value === 'string' && value) headers[key] = value
+  }
+  if (session.packageName) headers['x-w3kits-plugin-package'] = session.packageName
+  if (session.packageIntegrity) headers['x-w3kits-plugin-integrity'] = session.packageIntegrity
+  return headers
+}
+
+function objectFacadeRelativePath(session: W3KitsRuntimeSession, path: string): string {
+  const visibleConfigDir = session.storage?.visibleConfigDir?.replace(/\/+$/, '')
+  if (visibleConfigDir && path.startsWith(visibleConfigDir + '/')) return path.slice(visibleConfigDir.length + 1)
+  const marker = '/.config/' + (session.pluginId || W3KITS_PLUGIN_ID) + '/'
+  const index = path.indexOf(marker)
+  return index >= 0 ? path.slice(index + marker.length) : path.replace(/^\/+/, '')
+}
 export async function getW3KitsOpenAiHeaders(): Promise<Record<string, string>> {
   const session = await getW3KitsRuntimeSession()
   const headers: Record<string, string> = {
@@ -228,11 +280,19 @@ export async function getW3KitsOpenAiHeaders(): Promise<Record<string, string>> 
 
 export async function readW3KitsStorage(path: string): Promise<StorageReadResult | null> {
   try {
-    return await bridgeRequest<StorageReadResult>({
-      type: W3KITS_STORAGE_READ,
-      pluginId: W3KITS_PLUGIN_ID,
-      path
+    const session = await getW3KitsRuntimeSession()
+    const storage = w3kitsObjectStorage(session)
+    const response = await fetch(w3kitsObjectUrl(storage, path), {
+      headers: w3kitsObjectHeaders(session)
     })
+    if (response.status === 404) return null
+    if (!response.ok) throw new Error(await response.text().catch(() => 'w3kits_storage_read_failed'))
+    return {
+      body: await response.text(),
+      contentType: response.headers.get('content-type') || undefined,
+      etag: response.headers.get('etag') || undefined,
+      revision: response.headers.get('x-w3kits-vfs-revision') || undefined
+    }
   } catch (error) {
     if (isNotFoundError(error)) return null
     throw error
@@ -240,22 +300,28 @@ export async function readW3KitsStorage(path: string): Promise<StorageReadResult
 }
 
 export async function writeW3KitsStorage(path: string, body: string, contentType = 'text/plain;charset=UTF-8'): Promise<StorageWriteResult> {
-  return bridgeRequest<StorageWriteResult>({
-    type: W3KITS_STORAGE_WRITE,
-    pluginId: W3KITS_PLUGIN_ID,
-    path,
-    body,
-    contentType
+  const session = await getW3KitsRuntimeSession()
+  const storage = w3kitsObjectStorage(session)
+  const response = await fetch(w3kitsObjectUrl(storage, path, { formatJson: true }), {
+    method: 'PUT',
+    headers: w3kitsObjectHeaders(session, contentType),
+    body
   })
+  if (!response.ok) throw new Error(await response.text().catch(() => 'w3kits_storage_write_failed'))
+  return response.json().catch(() => ({})) as Promise<StorageWriteResult>
 }
 
 export async function deleteW3KitsStorage(path: string): Promise<{ deleted?: boolean } | null> {
   try {
-    return await bridgeRequest<{ deleted?: boolean }>({
-      type: W3KITS_STORAGE_DELETE,
-      pluginId: W3KITS_PLUGIN_ID,
-      path
+    const session = await getW3KitsRuntimeSession()
+    const storage = w3kitsObjectStorage(session)
+    const response = await fetch(w3kitsObjectUrl(storage, path, { formatJson: true }), {
+      method: 'DELETE',
+      headers: w3kitsObjectHeaders(session)
     })
+    if (response.status === 404) return { deleted: false }
+    if (!response.ok) throw new Error(await response.text().catch(() => 'w3kits_storage_delete_failed'))
+    return response.json().catch(() => ({ deleted: true })) as Promise<{ deleted?: boolean }>
   } catch (error) {
     if (isNotFoundError(error)) return { deleted: false }
     throw error
@@ -263,19 +329,27 @@ export async function deleteW3KitsStorage(path: string): Promise<{ deleted?: boo
 }
 
 export async function listW3KitsStorage(path = ''): Promise<Array<{ path: string; kind?: string }>> {
-  const response = await bridgeRequest<{ entries?: Array<{ path: string; kind?: string }> }>({
-    type: W3KITS_STORAGE_LIST,
-    pluginId: W3KITS_PLUGIN_ID,
-    path
+  const session = await getW3KitsRuntimeSession()
+  const storage = w3kitsObjectStorage(session)
+  const response = await fetch(w3kitsObjectUrl(storage, path, { list: true }), {
+    headers: w3kitsObjectHeaders(session)
   })
-  return Array.isArray(response.entries) ? response.entries : []
+  if (!response.ok) throw new Error(await response.text().catch(() => 'w3kits_storage_list_failed'))
+  const payload = await response.json().catch(() => ({})) as { objects?: Array<{ path: string; kind?: string }>; commonPrefixes?: string[] }
+  const files = Array.isArray(payload.objects) ? payload.objects.map((entry) => ({ path: objectFacadeRelativePath(session, entry.path), kind: entry.kind })) : []
+  const directories = Array.isArray(payload.commonPrefixes) ? payload.commonPrefixes.map((prefix) => ({ path: prefix.replace(/\/+$/, ''), kind: 'directory' })) : []
+  return [...directories, ...files]
 }
 
 export async function syncW3KitsStorage(): Promise<{ queued?: boolean; temporary?: boolean }> {
-  return bridgeRequest<{ queued?: boolean; temporary?: boolean }>({
-    type: W3KITS_STORAGE_SYNC,
-    pluginId: W3KITS_PLUGIN_ID
+  const session = await getW3KitsRuntimeSession()
+  const storage = w3kitsObjectStorage(session)
+  const response = await fetch(w3kitsObjectUrl(storage, '', { sync: true }), {
+    method: 'POST',
+    headers: w3kitsObjectHeaders(session)
   })
+  if (!response.ok) throw new Error(await response.text().catch(() => 'w3kits_storage_sync_failed'))
+  return response.json().catch(() => ({ queued: true })) as Promise<{ queued?: boolean; temporary?: boolean }>
 }
 
 installW3KitsAuthFetchInterceptor()
